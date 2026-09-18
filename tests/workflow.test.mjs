@@ -1,0 +1,15 @@
+import test from 'node:test';import assert from 'node:assert/strict';import vm from 'node:vm';import fs from 'node:fs';import {groupFrames} from '../public/engine.mjs';
+test('bulk queue exports before/after pairs, skips invalid sets, and permits preview review',async()=>{
+ const elements=new Map(),draws=[],sent=[],archives=[],downloads=[];
+ const context2d={clearRect(){},beginPath(){},moveTo(){},lineTo(){},stroke(){},fillRect(){},putImageData(...args){draws.push(args);}};
+ const element=id=>{if(!elements.has(id))elements.set(id,{value:'0',checked:true,width:500,height:100,dataset:{},classList:{toggle(){},add(){},remove(){}},addEventListener(event,fn){this[event]=fn;},getContext(){return context2d;},click(){downloads.push(this.download);}});return elements.get(id);};
+ class Worker{constructor(){Worker.last=this;}postMessage(q){sent.push(q);}terminate(){}}
+ const sandbox={fetch:async()=>({ok:true,json:async()=>({configured:false})}),document:{querySelector:s=>element(s),createElement:()=>element('download')},groupFrames,makeZip:async files=>{archives.push(files);return new Blob(['zip']);},Worker,Blob,URL:{createObjectURL:()=>'',revokeObjectURL(){}},ImageData:class{constructor(data,width,height){Object.assign(this,{data,width,height});}},setTimeout:()=>1,clearTimeout(){},crossOriginIsolated:true,navigator:{}};
+ vm.createContext(sandbox);const src=fs.readFileSync(new URL('../public/app.js',import.meta.url),'utf8').replace(/^import .*;$/gm,'');vm.runInContext(src,sandbox);
+ element('#grouping').value='auto';element('#batchFormat').value='pair';element('#quality').value='half';element('#deghost').value='4';element('#split').value='50';
+ const frames=[0,1,2,3,4].map((n)=>({id:String(n),name:'frame'+n+'.cr3',ev:n%2,meta:{timestamp:100+n,camera_model:'test',width:2,height:1}}));
+ const emit=d=>Worker.last.onmessage({data:d});emit({kind:'scanned',frames,errors:[]});element('#mergeAllTop').onclick();
+ for(let n=0;n<2;n++){const merge=sent.filter(q=>q.kind==='merge').at(-1);assert.equal(merge.frames.length,2);emit({kind:'merged',stats:{width:2,height:1,span:1,frames:2,motionPercent:0,warnings:[]}});const preview={width:2,height:1,data:new Uint8ClampedArray(8),histogram:new Uint32Array(64)};emit({kind:'preview',requestID:merge.requestID,preview,before:preview});assert.equal(sent.at(-1).variant,'before');emit({kind:'exported',blob:new Blob(['before']),format:'png',variant:'before'});assert.equal(sent.at(-1).variant,'after');emit({kind:'exported',blob:new Blob(['after']),format:'png',variant:'after'});}
+ await new Promise(resolve=>setImmediate(resolve));assert.equal(archives.length,1);assert.equal(archives[0].length,5);assert.equal(sent.filter(q=>q.kind==='merge').length,2);assert.match(element('#message').textContent,/2 group\(s\) exported/);assert.match(element('#message').textContent,/Set 3/);assert.equal(downloads[0],'latitude_hdr_batch.zip');
+ element('#groups').click({target:{closest:()=>({dataset:{select:'0'}})}});assert.equal(element('#compareControls').hidden,false);assert.equal(element('#png').disabled,true);assert.equal(element('#compareView').disabled,false);assert.ok(draws.some(args=>args.length===7));
+});
