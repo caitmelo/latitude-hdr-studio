@@ -8,7 +8,7 @@ Live app: https://latitude-hdr-studio.caitmelo.chatgpt.site
 
 Requires a current Node.js runtime. Run `npm test` for the regression suite and `npm run build` to produce the Worker in `dist/server/index.js`. UI sources are in `public/`, processing in `public/engine.mjs` and `public/process.worker.mjs`, and the Worker backend in `src/server.js`.
 
-Hosting configuration is intentionally empty. Configure your own hosting project, allowed origin, authenticated identity handling and server-side `OPENAI_API_KEY` before deploying the AI routes. Never put an API key in browser code or commit it. The published app does not yet have its AI secret configured; no live AI request has been verified.
+Hosting configuration is intentionally empty because the ChatGPT Sites project binding is environment-specific. In the Site owner’s **Settings**, add `OPENAI_API_KEY` as a hosted secret, then redeploy the approved Site version. Never put an API key in browser code, `.openai/hosting.json`, or the repository. The app uses the hosted Sites sign-in flow (`/signin-with-chatgpt`) and accepts AI requests only when Sites injects a signed-in visitor’s `oai-authenticated-user-email`; the endpoint also enforces a same-origin check, bounded preview payload and per-user cooldown.
 
 ## Processing and limits
 

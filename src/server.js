@@ -10,8 +10,8 @@ export function validateSettings(input){const tone={};for(const [k,[lo,hi]] of O
 async function readBody(request){if(Number(request.headers.get('content-length'))>1800000)throw Error('Preview is too large.');const reader=request.body?.getReader();if(!reader)throw Error('Missing preview.');let size=0,text='',decoder=new TextDecoder();try{while(true){const {done,value}=await reader.read();if(done)break;size+=value.byteLength;if(size>1800000){await reader.cancel();throw Error('Preview is too large.');}text+=decoder.decode(value,{stream:true});}text+=decoder.decode();return JSON.parse(text);}finally{reader.releaseLock();}}
 export async function handleApi(request,env,fetcher=fetch){
  const path=new URL(request.url).pathname;
- // Sites dispatch authenticates private-site visitors and supplies this identity.
- const user=request.headers.get('oai-authenticated-user-id');if(!user)return json({error:'Sign in to HDR Studio to use AI.'},401);
+ // ChatGPT Sites injects this header only after its server-side sign-in flow.
+ const user=request.headers.get('oai-authenticated-user-email')?.trim().toLowerCase();if(!user||user.length>254)return json({error:'Sign in with ChatGPT to use AI.'},401);
  if(path==='/api/ai/status'&&request.method==='GET')return json({configured:!!env.OPENAI_API_KEY,model:MODEL});
  if(path!=='/api/ai/enhance')return json({error:'Not found.'},404);
  if(request.method!=='POST')return json({error:'Use POST.'},405);

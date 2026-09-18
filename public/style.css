@@ -3,4 +3,4 @@
 
 .compare-controls{display:flex;align-items:center;gap:16px;padding:12px 20px;border-top:1px solid var(--line);font-size:14px}.compare-controls span{flex:0 0 auto}.compare-controls input{min-width:60px}.batch-heading,.panel-head,.toolbar{flex-wrap:wrap}.group-status{font-size:13px;margin-left:12px}.batch-heading{gap:10px}.batch-heading h2{margin-right:auto}@media(max-width:600px){.compare-controls{flex-wrap:wrap;gap:8px}.compare-controls input{order:3;flex-basis:100%}.compare-controls span:last-child{margin-left:auto}}
 
-.ai-panel{padding:14px;border:1px solid var(--line);border-radius:8px;margin-bottom:18px}.ai-panel>strong{font-size:15px}#aiExplanation{font-size:14px;margin-top:12px}
+.ai-panel{padding:14px;border:1px solid var(--line);border-radius:8px;margin-bottom:18px}.ai-panel>strong{font-size:15px}a.sign-in{display:block;text-align:center;text-decoration:none}#aiExplanation{font-size:14px;margin-top:12px}
