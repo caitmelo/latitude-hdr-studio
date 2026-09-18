@@ -16,7 +16,7 @@ RAW decoding uses LibRaw-Wasm 1.6.0, with its WASM binary fetched from jsDelivr.
 
 Bulk processing runs sequentially and exports a ZIP capped at 512 MiB. PNG exports are tone-mapped sRGB; linear float TIFF and Radiance HDR exports are available. Before/after compares two renderings of the merged HDR. Window control preserves recovered bright detail with a global tone curve rather than semantic window masking.
 
-The optional AI endpoint sends a reduced JPEG preview to OpenAI on explicit request and returns bounded colour and tone controls. Apply/Revert uses the original HDR rendering; it does not generate replacement scene content. RAW files are processed locally. API routes require authenticated identity and must be adapted appropriately for a different hosting environment.
+For a signed-in visitor, automatic AI assessment sends one reduced JPEG preview to OpenAI after each individual merge and returns a bounded decision: either retain the natural rendering or automatically apply conservative colour and tone controls. Visitors can disable automatic assessment before merging and can revert an applied adjustment. Bulk exports never trigger automatic AI calls. AI does not generate replacement scene content; RAW files are processed locally. API routes require authenticated identity and must be adapted appropriately for a different hosting environment.
 
 ## Validation
 
