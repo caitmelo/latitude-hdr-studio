@@ -19,3 +19,13 @@ test('auto suppression tolerates small noise but rejects a moving patch',()=>{co
 test('tone mapping does not make halos on a step edge',()=>{const w=1024,h=8,img=frame(Array.from({length:w*h*3},(_,i)=>Math.floor(i/3)%w<w/2?.03:.8),w,h);const out=toneMap(img);for(let x=1;x<w/2;x++)assert.equal(out.data[x*4],out.data[0]);for(let x=w/2+1;x<w;x++)assert.equal(out.data[x*4],out.data[w/2*4]);assert.ok(out.data[0]<out.data[w/2*4]);});
 test('unrecovered samples retain camera colour rather than forced white',async()=>{const {cameraToRGB}=await import('../public/engine.mjs');const img=frame([.8,.4,.2]);img.unrecovered=new Uint8Array([1]);cameraToRGB(img,[[1,0,0],[0,1,0],[0,0,1]],[1,1,1]);assert.ok(img.data[0]>img.data[1]&&img.data[1]>img.data[2]);});
 test('window detail keeps bright recovered levels distinct and monotonic',()=>{const values=[.02,.18,1,2,4,8,12],img=frame(values.flatMap(v=>[v,v,v]));const enhanced=toneMap(img,{windowPull:1}),base=toneMap(img,{windowPull:0});const levels=values.map((_,i)=>enhanced.data[i*4]);for(let i=1;i<levels.length;i++)assert.ok(levels[i]>=levels[i-1]);assert.ok(levels[4]<levels[5]);assert.ok(levels[5]<levels[6]);assert.ok(levels[6]<base.data[6*4]);});
+
+test('clipped clouds roll off neutrally while recoverable bracket colour stays intact',async()=>{
+ const {cameraToRGB}=await import('../public/engine.mjs');const matrix=[[1,0,0],[0,1,0],[0,0,1]],wb=[2,1,1.4];
+ const clipped=frame([1,1,1]),a=createAccumulator(clipped,0);addFrame(a,clipped,0,{isReference:true});const out=finish(a);cameraToRGB(out,matrix,wb);assert.equal(out.data[0],out.data[1]);assert.equal(out.data[1],out.data[2]);
+ const b=createAccumulator(clipped,0);addFrame(b,clipped,0,{isReference:true});addFrame(b,frame([.1,.2,.3]),-2);const valid=finish(b);cameraToRGB(valid,matrix,wb);assert.equal(valid.highlightRisk[0],0);assert.ok(valid.data[2]>valid.data[1]);
+});
+test('natural exposure blend opens dark detail and keeps neutral pixels neutral',()=>{
+ const w=96,h=64,src=frame(Array.from({length:w*h*3},(_,i)=>{const x=Math.floor(i/3)%w;return x<w/3?.015:x<2*w/3?.2:3;}),w,h);
+ const developed=toneMap(src,{natural:true,shadows:.85}),before=toneMap(src,{shadows:0,compression:0,windowPull:0,saturation:1});assert.ok(developed.data[0]>before.data[0]+15);for(let i=0;i<developed.data.length;i+=4){assert.equal(developed.data[i],developed.data[i+1]);assert.equal(developed.data[i],developed.data[i+2]);assert.equal(developed.data[i+3],255);}assert.ok(developed.data[(w-1)*4]>developed.data[0]);
+});

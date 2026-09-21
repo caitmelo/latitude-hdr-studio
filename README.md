@@ -1,27 +1,65 @@
 # Latitude HDR Studio
 
-Browser-based RAW bracket HDR merging with automatic grouping, adaptive motion suppression, bulk ZIP export, before/after comparison and optional AI colour assistance.
+RAW bracket merging in the browser, followed by one optional GPT Image edit per bracket group.
 
-Live app: https://latitude-hdr-studio.caitmelo.chatgpt.site
+- Public app / test link: https://latitude-hdr-studio.caitmelo.chatgpt.site
+- Public source: https://github.com/caitmelo/latitude-hdr-studio
+- Developer handoff: [DEVELOPER_HANDOFF.md](DEVELOPER_HANDOFF.md)
+- Exact image-edit prompt: [docs/AI_PROMPT.md](docs/AI_PROMPT.md)
+
+This snapshot synchronizes the application source from deployed Sites version 12, commit `997cd5295694c020f3cf426b3c371ff3aa25927f`. Documentation is refreshed for this handoff. GitHub and Sites are separate repositories: updating GitHub does not automatically deploy the app.
+
+## Three processing stages
+
+1. **Read, group and merge with code.** LibRaw-Wasm decodes camera RAWs. Exposure metadata suggests bracket groups; clickable embedded thumbnails allow inspection and frames can be moved. Code aligns exposures, automatically estimates motion suppression and combines reliable samples into scene-linear HDR.
+2. **Develop with code.** Camera white balance and colour conversion, highlight handling and multiscale virtual-exposure blending produce a viewable natural rendering. No AI request is needed for this stage.
+3. **Finish with GPT Image once.** Enabled by default, this sends the developed JPEG preview to `/api/ai/edit`. The server makes one OpenAI Images edit request, asking for natural colour and haze correction. The returned JPEG is kept separately. Bulk groups run sequentially. Manual reruns or remerging with automatic AI enabled make additional requests; there are no automatic retries.
+
+The legacy `/api/ai/enhance` slider-assessment endpoint remains in the source, but its control is hidden and off by default. It is not an additional AI pass in the normal workflow.
+
+## Comparison and exports
+
+After shows the actual GPT Image output when available. Before shows its exact input JPEG, and Compare splits those images. Without AI, comparison shows local development changes. Bracket tabs distinguish AI-finished and merge-only results.
+
+The final AI file ends in `_gpt_image.jpg`. Bulk export includes the selected local export(s), successful AI JPEGs and a JSON summary. The default `pair` option can therefore produce **three images per group**: base PNG, developed PNG and AI JPEG. These are not three AI calls. Selecting one local export format gives one local image plus the AI JPEG. A final-only export mode is not implemented.
 
 ## Development
 
-Requires a current Node.js runtime. Run `npm test` for the regression suite and `npm run build` to produce the Worker in `dist/server/index.js`. UI sources are in `public/`, processing in `public/engine.mjs` and `public/process.worker.mjs`, and the Worker backend in `src/server.js`.
+Use a current Node.js runtime supporting native Fetch, FormData, Blob and the Node test runner (Node 22+ recommended for this codebase).
 
-Hosting configuration is intentionally empty because the ChatGPT Sites project binding is environment-specific. In the Site owner’s **Settings**, add `OPENAI_API_KEY` as a hosted secret, then redeploy the approved Site version. Never put an API key in browser code, `.openai/hosting.json`, or the repository. The app uses the hosted Sites sign-in flow (`/signin-with-chatgpt`) and accepts AI requests only when Sites injects a signed-in visitor’s `oai-authenticated-user-email`; the endpoint also enforces a same-origin check, bounded preview payload and per-user cooldown.
+```sh
+npm test
+npm run build
+```
 
-## Processing and limits
+The project has no npm dependencies and no `dev` script. Build creates `dist/server/index.js`, a Worker entrypoint with public assets embedded. Serve the Worker through a compatible runtime; serving `public/` alone does not provide AI routes. See the handoff for hosting/authentication requirements.
 
-RAW decoding uses LibRaw-Wasm 1.6.0, with its WASM binary fetched from jsDelivr. RAW compatibility depends on the decoder, camera and compression; support is not universal. Alignment corrects translation only. Motion suppression is adaptive but cannot guarantee removal of all movement or parallax artifacts. Clipped detail cannot be recovered without an unclipped source sample.
+## Source map
 
-Bulk processing runs sequentially and exports a ZIP capped at 512 MiB. PNG exports are tone-mapped sRGB; linear float TIFF and Radiance HDR exports are available. Before/after compares two renderings of the merged HDR. Window control preserves recovered bright detail with a global tone curve rather than semantic window masking.
+| File | Responsibility |
+| --- | --- |
+| `public/app.js` | UI, bracket queue, previews, sequential bulk jobs and AI calls |
+| `public/process.worker.mjs` | RAW metadata/thumbnails, decode, merge and export jobs |
+| `public/engine.mjs` | Numerical merge, exposure, colour and output encoders |
+| `public/alignment.mjs` | Affine refinement after translation alignment |
+| `public/render.mjs` | Natural multiscale display rendering |
+| `public/zip.mjs` | Batch ZIP packaging |
+| `src/server.js` | Authenticated AI endpoints and Worker request handler |
+| `scripts/build.mjs` | Bundle public assets and Worker source |
+| `tests/` | Numerical, alignment, API and simulated UI regression tests |
 
-For a signed-in visitor, automatic AI assessment sends one reduced JPEG preview to OpenAI after each individual merge and returns a bounded decision: either retain the natural rendering or automatically apply conservative colour and tone controls. Visitors can disable automatic assessment before merging and can revert an applied adjustment. Bulk exports never trigger automatic AI calls. AI does not generate replacement scene content; RAW files are processed locally. API routes require authenticated identity and must be adapted appropriately for a different hosting environment.
+## Limits and privacy
 
-## Validation
+RAWs stay on the device; AI sends a reduced merged JPEG to OpenAI. There is no durable session storage or resumable server queue. Closing or refreshing clears in-memory results.
 
-Tests cover numerical rendering and merge behavior, simulated batch workflow and mocked API handling. End-to-end browser RAW decoding and a live OpenAI connection have not been verified by this suite.
+Camera support depends on LibRaw-Wasm 1.6.0, camera model and compression; not every RAW type/mode is supported. Maximum 200 MB per file, 32 MP decoded output per frame, 100 files per import action and 512 MiB per ZIP. Full-resolution work can require gigabytes of memory. Alignment handles small translation, rotation and skew, not strong parallax or arbitrary movement. Detail clipped in every frame cannot be recovered.
 
-## Third-party software
+AI input is capped at 1536px on its long side (bulk preview is 1200px wide before this cap). Requested output has a 1536px long side with dimensions rounded to multiples of 16. It is not full-resolution RAW finishing. Generative edits may alter details and require visual inspection. API charges apply.
 
-LibRaw-Wasm source and build information: https://github.com/ybouane/LibRaw-Wasm/tree/v1.6.0. Its package is ISC licensed; the build includes LibRaw (LGPL-2.1/CDDL-1.0), Little CMS and codec libraries. Vendored JavaScript glue remains replaceable. Fonts are delivered by Google Fonts with system fallbacks.
+TIFF stores float32 scene-linear RGB with sRGB primaries/D65 metadata, without an embedded ICC profile. HDR uses RGBE; PNG is an 8-bit developed image. RAW DNG and EXR export are not implemented.
+
+## Validation and dependencies
+
+The last deployed version passed 34 automated tests. The three supplied Canon CR3 files were previously exercised with the actual LibRaw-Wasm worker, and embedded JPEG thumbnails were verified. Four successful live `/api/ai/edit` responses were observed on 18 September 2026. These checks do not guarantee natural colour or geometry preservation for every scene.
+
+LibRaw-Wasm JavaScript glue is vendored; its matching WASM binary loads from jsDelivr on first use. Upstream source and licensing: https://github.com/ybouane/LibRaw-Wasm/tree/v1.6.0. Review bundled LibRaw and codec licences for redistribution. No customer photos or API secrets belong in this repository.

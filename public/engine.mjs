@@ -1,3 +1,4 @@
+import {exposureBlend} from './render.mjs?v=9';
 /** Linear RGB HDR core. All exposure values express log2 of sensor exposure. */
 export const luma=(r,g,b)=>.2126*r+.7152*g+.0722*b;
 export const clamp=(x,a=0,b=1)=>Math.min(b,Math.max(a,x));
@@ -26,8 +27,8 @@ export function align(reference,image){
 }
 /** Refine nominal EXIF exposure using reliable, aligned midtone samples. */
 export function estimateExposure(ref,img,expected,shift={dx:0,dy:0}){const ratios=[],{width:w,height:h}=ref;const step=Math.max(1,Math.floor(Math.sqrt(w*h/30000)));for(let y=Math.max(0,-shift.dy);y<Math.min(h,h-shift.dy);y+=step)for(let x=Math.max(0,-shift.dx);x<Math.min(w,w-shift.dx);x+=step){const p=y*w+x,q=(y+shift.dy)*w+x+shift.dx,i=p*3,j=q*3;if(ref.clip?.[p]||img.clip?.[q])continue;const a=luma(...ref.data.subarray(i,i+3)),b=luma(...img.data.subarray(j,j+3));if(a<.015||b<.015||Math.max(...ref.data.subarray(i,i+3))>.8||Math.max(...img.data.subarray(j,j+3))>.8)continue;ratios.push(Math.log2(b/a));}if(ratios.length<256)return expected;ratios.sort((a,b)=>a-b);const measured=ratios[Math.floor(ratios.length/2)];return Math.abs(measured-expected)<.8?measured:expected;}
-export function cameraToRGB(img,matrix,wb){if(!matrix||matrix.length<3||!matrix.slice(0,3).every(row=>row?.slice(0,3).length===3&&row.slice(0,3).every(Number.isFinite)&&row.slice(0,3).some(v=>Math.abs(v)>.001)))throw Error('Camera colour matrix unavailable.');const green=wb[1]||1,gains=wb.slice(0,3).map(v=>v/green);for(let i=0;i<img.data.length;i+=3){const a=img.data[i]*gains[0],b=img.data[i+1]*gains[1],c=img.data[i+2]*gains[2];for(let j=0;j<3;j++)img.data[i+j]=matrix[j][0]*a+matrix[j][1]*b+matrix[j][2]*c;}return img;}
-export function createAccumulator(ref,referenceEV){const n=ref.width*ref.height;return {ref,referenceEV,sum:new Float32Array(n*3),weight:new Float32Array(n),fallback:new Float32Array(n*3),best:new Float32Array(n).fill(-1),motion:new Uint8Array(n),reliable:new Uint8Array(n),autoSettings:[],bounds:{x0:0,y0:0,x1:ref.width,y1:ref.height},clipped:0};}
+export function cameraToRGB(img,matrix,wb){if(!matrix||matrix.length<3||!matrix.slice(0,3).every(row=>row?.slice(0,3).length===3&&row.slice(0,3).every(Number.isFinite)&&row.slice(0,3).some(v=>Math.abs(v)>.001)))throw Error('Camera colour matrix unavailable.');const green=wb[1]||1,gains=wb.slice(0,3).map(v=>v/green);for(let i=0;i<img.data.length;i+=3){const a=img.data[i]*gains[0],b=img.data[i+1]*gains[1],c=img.data[i+2]*gains[2];for(let j=0;j<3;j++)img.data[i+j]=matrix[j][0]*a+matrix[j][1]*b+matrix[j][2]*c;const risk=img.highlightRisk?.[i/3]||0;if(risk>0){const neutral=Math.max(img.data[i],img.data[i+1],img.data[i+2],0);for(let c=0;c<3;c++)img.data[i+c]=img.data[i+c]*(1-risk)+neutral*risk;}}return img;}
+export function createAccumulator(ref,referenceEV){const n=ref.width*ref.height;return {ref,referenceEV,sum:new Float32Array(n*3),weight:new Float32Array(n),fallback:new Float32Array(n*3),best:new Float32Array(n).fill(-1),motion:new Uint8Array(n),reliable:new Uint8Array(n),minPeak:new Float32Array(n).fill(Infinity),autoSettings:[],bounds:{x0:0,y0:0,x1:ref.width,y1:ref.height},clipped:0};}
 /** Robust residual calibration per frame. Cap tolerance so widespread motion is not learned away. */
 export function motionTolerance(ref,img,ratio,dx=0,dy=0){
  const errors=[],w=ref.width,h=ref.height,step=Math.max(1,Math.floor(Math.sqrt(w*h/16000)));
@@ -44,6 +45,7 @@ export function addFrame(acc,img,ev,{dx=0,dy=0,deghost=0,isReference=false}={}){
  const automatic=deghost===4?motionTolerance(acc.ref,img,ratio,dx,dy):null;if(automatic&&!isReference)acc.autoSettings.push(automatic);
  const x0=Math.max(0,-dx),y0=Math.max(0,-dy),x1=Math.min(w,w-dx),y1=Math.min(h,h-dy);acc.bounds.x0=Math.max(acc.bounds.x0,x0);acc.bounds.y0=Math.max(acc.bounds.y0,y0);acc.bounds.x1=Math.min(acc.bounds.x1,x1);acc.bounds.y1=Math.min(acc.bounds.y1,y1);
  for(let y=y0;y<y1;y++)for(let x=x0;x<x1;x++){const p=y*w+x,i=p*3,j=((y+dy)*w+x+dx)*3;const clipped=img.clip?.[(y+dy)*w+x+dx]||0;const refClipped=acc.ref.clip?.[p]||0;const r=b[j],g=b[j+1],bl=b[j+2],v=Math.max(r,g,bl),lo=Math.min(r,g,bl),rv=Math.max(a[i],a[i+1],a[i+2]);const lum=luma(r,g,bl),rl=luma(a[i],a[i+1],a[i+2]);
+ acc.minPeak[p]=Math.min(acc.minPeak[p],v);
  // Shared RGB weights avoid per-channel hue shifts; reject saturated samples.
  let weight=clipped||v>=.95?0:Math.max(0,Math.min(lum/.15,(.95-v)/.25,1));if(lo<0||!Number.isFinite(lum))weight=0;
  if(!clipped&&v<.95)acc.reliable[p]=1;
@@ -57,9 +59,9 @@ if(delta>tolerance){acc.motion[p]=1;weight=0;}}
  acc.weight[p]+=weight;for(let c=0;c<3;c++)acc.sum[i+c]+=b[j+c]/ratio*weight;
  }
 }
-export function finish(acc,{crop=true,deghost=0}={}){const {width:w,height:h,data:ref}=acc.ref;const box=crop?acc.bounds:{x0:0,y0:0,x1:w,y1:h};const width=box.x1-box.x0,height=box.y1-box.y0;if(width<1||height<1)throw Error('Frames have no common image area.');const data=new Float32Array(width*height*3),unrecoveredMask=new Uint8Array(width*height);let motion=0,unrecovered=0;const radius=Math.min(w,h)<8?0:Math.max(1,Math.round(Math.min(w,h)/600));const softMask=deghost?boxBlur(acc.motion,w,h,radius):null;
- for(let y=0;y<height;y++)for(let x=0;x<width;x++){const p=(y+box.y0)*w+x+box.x0,i=p*3,j=(y*width+x)*3;const confidence=softMask?clamp((softMask[p]-.15)/.65):0;const useRef=deghost&&!acc.ref.clip?.[p]&&Math.max(ref[i],ref[i+1],ref[i+2])<.90?confidence*confidence*(3-2*confidence):0;if(useRef>.5)motion++;if(!acc.reliable[p]){unrecovered++;unrecoveredMask[y*width+x]=1;}for(let c=0;c<3;c++)data[j+c]=Math.max(0,ref[i+c]*useRef+(1-useRef)*(acc.weight[p]>0?acc.sum[i+c]/acc.weight[p]:acc.fallback[i+c]));}
- return {width,height,data,unrecovered:unrecoveredMask,motionPercent:100*motion/(width*height),unrecoveredPercent:100*unrecovered/(width*height),crop:box,autoSettings:acc.autoSettings};
+export function finish(acc,{crop=true,deghost=0}={}){const {width:w,height:h,data:ref}=acc.ref;const box=crop?acc.bounds:{x0:0,y0:0,x1:w,y1:h};const width=box.x1-box.x0,height=box.y1-box.y0;if(width<1||height<1)throw Error('Frames have no common image area.');const data=new Float32Array(width*height*3),unrecoveredMask=new Uint8Array(width*height),highlightRisk=new Float32Array(width*height);let motion=0,unrecovered=0;const radius=Math.min(w,h)<8?0:Math.max(1,Math.round(Math.min(w,h)/600));const softMask=deghost?boxBlur(acc.motion,w,h,radius):null;
+ for(let y=0;y<height;y++)for(let x=0;x<width;x++){const p=(y+box.y0)*w+x+box.x0,i=p*3,j=(y*width+x)*3;const confidence=softMask?clamp((softMask[p]-.15)/.65):0;const useRef=deghost&&!acc.ref.clip?.[p]&&Math.max(ref[i],ref[i+1],ref[i+2])<.90?confidence*confidence*(3-2*confidence):0;const risk=clamp((acc.minPeak[p]-.88)/.11);highlightRisk[y*width+x]=risk*risk*(3-2*risk);if(useRef>.5)motion++;if(!acc.reliable[p]){unrecovered++;unrecoveredMask[y*width+x]=1;}for(let c=0;c<3;c++)data[j+c]=Math.max(0,ref[i+c]*useRef+(1-useRef)*(acc.weight[p]>0?acc.sum[i+c]/acc.weight[p]:acc.fallback[i+c]));}
+ return {width,height,data,highlightRisk,unrecovered:unrecoveredMask,motionPercent:100*motion/(width*height),unrecoveredPercent:100*unrecovered/(width*height),crop:box,autoSettings:acc.autoSettings};
 }
 // Area averaging is performed in linear light, before the display curve.
 export function resizeLinear(img,maxWidth){
@@ -72,8 +74,8 @@ export function resizeLinear(img,maxWidth){
 }
 function boxBlur(src,w,h,r){const temp=new Float32Array(src.length),out=new Float32Array(src.length);for(let y=0;y<h;y++){let sum=0;for(let x=0;x<=Math.min(r,w-1);x++)sum+=src[y*w+x];for(let x=0;x<w;x++){temp[y*w+x]=sum/(Math.min(w-1,x+r)-Math.max(0,x-r)+1);if(x-r>=0)sum-=src[y*w+x-r];if(x+r+1<w)sum+=src[y*w+x+r+1];}}for(let x=0;x<w;x++){let sum=0;for(let y=0;y<=Math.min(r,h-1);y++)sum+=temp[y*w+x];for(let y=0;y<h;y++){out[y*w+x]=sum/(Math.min(h-1,y+r)-Math.max(0,y-r)+1);if(y-r>=0)sum-=temp[(y-r)*w+x];if(y+r+1<h)sum+=temp[(y+r+1)*w+x];}}return out;}
 /** Scene-adaptive photographic rendering. Neutral RGB remains neutral. */
-export function toneMap(img,{ev=0,compression=1.2,saturation=1.15,shadows=.85,contrast=1.08,warmth=0,tint=0,windowPull=.5,maxWidth=0}={}){
- const image=maxWidth?resizeLinear(img,maxWidth):img;const {width:w,height:h}=image,rgba=new Uint8ClampedArray(w*h*4),histogram=new Uint32Array(64);
+export function toneMap(img,{ev=0,compression=1.2,saturation=1.15,shadows=.85,contrast=1.08,warmth=0,tint=0,windowPull=.5,maxWidth=0,natural=false}={}){
+ const image=maxWidth?resizeLinear(img,maxWidth):img;if(natural)return exposureBlend(image,{ev,compression,saturation,shadows,warmth,tint,windowPull});const {width:w,height:h}=image,rgba=new Uint8ClampedArray(w*h*4),histogram=new Uint32Array(64);
  // Global statistics only: no spatial gain field that could bleed across edges.
  const small=resizeLinear(img,384),logs=new Float32Array(small.width*small.height),values=[];
  for(let i=0;i<logs.length;i++){const L=luma(small.data[i*3],small.data[i*3+1],small.data[i*3+2]);logs[i]=Math.log2(Math.max(L,1e-6));if(L>1e-5)values.push(L);}

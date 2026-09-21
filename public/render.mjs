@@ -1,0 +1,18 @@
+// Multi-resolution exposure blending of a single, already merged linear HDR.
+// All virtual exposures share geometry and colour; no generated scene content.
+const clamp=(v,a=0,b=1)=>Math.max(a,Math.min(b,v));
+const srgb=v=>v<=.0031308?12.92*v:1.055*v**(1/2.4)-.055;
+function down(src,w,h,c){const nw=Math.ceil(w/2),nh=Math.ceil(h/2),out=new Float32Array(nw*nh*c),kernel=[1,4,6,4,1];const tmp=new Float32Array(nw*h*c);for(let y=0;y<h;y++)for(let x=0;x<nw;x++)for(let k=0;k<c;k++){let sum=0;for(let d=-2;d<=2;d++)sum+=src[(y*w+clamp(2*x+d,0,w-1))*c+k]*kernel[d+2];tmp[(y*nw+x)*c+k]=sum/16;}for(let y=0;y<nh;y++)for(let x=0;x<nw;x++)for(let k=0;k<c;k++){let sum=0;for(let d=-2;d<=2;d++)sum+=tmp[(clamp(2*y+d,0,h-1)*nw+x)*c+k]*kernel[d+2];out[(y*nw+x)*c+k]=sum/16;}return {data:out,width:nw,height:nh};}
+function sample(img,x,y,c,k){const xx=clamp(x,0,img.width-1),yy=clamp(y,0,img.height-1),x0=Math.floor(xx),y0=Math.floor(yy),x1=Math.min(x0+1,img.width-1),y1=Math.min(y0+1,img.height-1),fx=xx-x0,fy=yy-y0;return (img.data[(y0*img.width+x0)*c+k]*(1-fx)+img.data[(y0*img.width+x1)*c+k]*fx)*(1-fy)+(img.data[(y1*img.width+x0)*c+k]*(1-fx)+img.data[(y1*img.width+x1)*c+k]*fx)*fy;}
+export function exposureBlend(img,{ev=0,saturation=1.15,shadows=.85,windowPull=.5,compression=1.2,warmth=0,tint=0}={}){
+ const {width:w,height:h,data}=img,n=w*h,samples=[];for(let p=0;p<n;p+=Math.max(1,Math.floor(n/20000))){const L=.2126*data[p*3]+.7152*data[p*3+1]+.0722*data[p*3+2];if(L>1e-5)samples.push(L);}samples.sort((a,b)=>a-b);const gain=clamp(.22/(samples[Math.floor(samples.length*.5)]||.22),.015625,64)*2**ev;
+ const stops=[-.5-clamp(windowPull)*.8-clamp(compression,0,3)*.08,1,1+clamp(shadows)*2.35],gains=[2**(warmth*.25),2**(-tint*.25),2**(-warmth*.25)];
+ const totals=new Float32Array(n);const weight=(p,m)=>{let d=0;for(let c=0;c<3;c++){const v=srgb(clamp(data[p*3+c]*gain*m*gains[c]));d+=(v-.5)**2;}return Math.exp(-d/(2*.22**2))+1e-6;};for(const stop of stops){const m=2**stop;for(let p=0;p<n;p++)totals[p]+=weight(p,m);}
+ const accumulated=[];
+ for(const stop of stops){const m=2**stop,pixels=new Float32Array(n*3),weights=new Float32Array(n);for(let p=0;p<n;p++){weights[p]=weight(p,m)/totals[p];for(let c=0;c<3;c++)pixels[p*3+c]=srgb(clamp(data[p*3+c]*gain*m*gains[c]));}
+ let level={data:pixels,width:w,height:h},wl={data:weights,width:w,height:h},depth=0;
+ while(true){const last=depth>=6||Math.min(level.width,level.height)<=2,next=last?null:down(level.data,level.width,level.height,3);if(!accumulated[depth])accumulated[depth]={width:level.width,height:level.height,data:new Float32Array(level.data.length)};const acc=accumulated[depth];for(let y=0;y<level.height;y++)for(let x=0;x<level.width;x++)for(let c=0;c<3;c++){const i=(y*level.width+x)*3+c;const expanded=last?0:sample(next,x*(next.width-1)/Math.max(1,level.width-1),y*(next.height-1)/Math.max(1,level.height-1),3,c);acc.data[i]+=(level.data[i]-expanded)*wl.data[y*level.width+x];}if(last)break;wl=down(wl.data,wl.width,wl.height,1);level=next;depth++;}
+ }
+ let out=accumulated.pop();while(accumulated.length){const hi=accumulated.pop();for(let y=0;y<hi.height;y++)for(let x=0;x<hi.width;x++)for(let c=0;c<3;c++)hi.data[(y*hi.width+x)*3+c]+=sample(out,x*(out.width-1)/Math.max(1,hi.width-1),y*(out.height-1)/Math.max(1,hi.height-1),3,c);out=hi;}
+ const rgba=new Uint8ClampedArray(n*4),histogram=new Uint32Array(64);for(let p=0;p<n;p++){const i=p*3,j=p*4,L=.2126*out.data[i]+.7152*out.data[i+1]+.0722*out.data[i+2];for(let c=0;c<3;c++)rgba[j+c]=255*clamp((L+(out.data[i+c]-L)*saturation-.02)/.96);rgba[j+3]=255;histogram[Math.min(63,Math.floor((.2126*rgba[j]+.7152*rgba[j+1]+.0722*rgba[j+2])/4))]++;}return {width:w,height:h,data:rgba,histogram};
+}
