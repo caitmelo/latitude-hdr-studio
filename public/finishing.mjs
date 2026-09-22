@@ -1,4 +1,4 @@
-export const STYLE_LABELS={natural:'Natural correction',internal:'Internal',internal_golden_hour:'Internal golden hour'};
+export const STYLE_LABELS={natural:'Natural correction',internal:'Internal',internal_golden_hour:'Internal golden hour',dusk:'Dusk',golden_hour:'Exterior golden hour',external_day:'External day'};
 export function selectedStyles(value){return value==='both'?['internal','internal_golden_hour']:value in STYLE_LABELS?[value]:['natural'];}
 export function jpegBlob(data){return new Blob([Uint8Array.from(atob(data.split(',')[1]),c=>c.charCodeAt(0))],{type:'image/jpeg'});}
 export async function requestEdit(input,style,signal){
