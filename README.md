@@ -63,3 +63,28 @@ TIFF stores float32 scene-linear RGB with sRGB primaries/D65 metadata, without a
 The last deployed version passed 34 automated tests. The three supplied Canon CR3 files were previously exercised with the actual LibRaw-Wasm worker, and embedded JPEG thumbnails were verified. Four successful live `/api/ai/edit` responses were observed on 18 September 2026. These checks do not guarantee natural colour or geometry preservation for every scene.
 
 LibRaw-Wasm JavaScript glue is vendored; its matching WASM binary loads from jsDelivr on first use. Upstream source and licensing: https://github.com/ybouane/LibRaw-Wasm/tree/v1.6.0. Review bundled LibRaw and codec licences for redistribution. No customer photos or API secrets belong in this repository.
+
+## Interior styles and Straightline integration
+
+This revision adds Internal and Internal golden hour, with a Both option. Each
+style is a separate Images edit request from the SAME prepared input (never
+chained through the other generated result). Both therefore makes two billable
+requests per photo. The server validates style names and owns the prompts.
+
+Use the existing RAW bracket flow, or the new ready-photo panel for JPEG, PNG
+and WebP inputs. Optional Straighten first runs the existing `shiftn-api`
+Python 1.1 engine locally via Pyodide before AI; unresolved geometry stops that
+photo rather than silently claiming success. This acts on the reduced AI input,
+not on archival linear HDR/TIFF exports. Browser startup requires the pinned
+Pyodide CDN. Existing sign-in and server-secret handling are preserved.
+
+Both outputs are retained and downloadable individually or in a batch ZIP.
+Partial AI failure keeps the other successful style and the original. No
+requests are automatically retried. Golden hour is generative relighting, not
+the experimental locally trained colour model. All generated images need
+visual inspection for altered details. Customer photographs are excluded from
+source control and hosted assets.
+
+`public/straighten/` vendors the upstream Python engine and worker from
+https://github.com/caitmelo/shiftn-api; its MIT notice is included.
+The public GitHub mirror and hosted Sites source remain separate repositories.
